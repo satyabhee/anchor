@@ -444,14 +444,78 @@ mod legacy {
 
     impl From<IdlTypeDefinition> for t::IdlTypeDef {
         fn from(value: IdlTypeDefinition) -> Self {
+            // The legacy spec lists generics by name only. A name used as an
+            // array length (`[T; N]`) is a const generic, anything else is a
+            // type generic.
+            let mut len_generics = Vec::new();
+            collect_len_generics_from_def(&value.ty, &mut len_generics);
+            let generics = value
+                .generics
+                .unwrap_or_default()
+                .into_iter()
+                .map(|name| {
+                    if len_generics.contains(&name) {
+                        t::IdlTypeDefGeneric::Const {
+                            name,
+                            ty: "usize".into(),
+                        }
+                    } else {
+                        t::IdlTypeDefGeneric::Type { name }
+                    }
+                })
+                .collect();
+
             Self {
                 name: value.name,
                 docs: value.docs.unwrap_or_default(),
                 serialization: Default::default(),
                 repr: Default::default(),
-                generics: Default::default(),
+                generics,
                 ty: value.ty.into(),
             }
+        }
+    }
+
+    /// Collect the generic names used as array lengths in a legacy type definition.
+    fn collect_len_generics_from_def(ty: &IdlTypeDefinitionTy, out: &mut Vec<String>) {
+        match ty {
+            IdlTypeDefinitionTy::Struct { fields } => {
+                fields.iter().for_each(|f| collect_len_generics(&f.ty, out));
+            }
+            IdlTypeDefinitionTy::Enum { variants } => {
+                for variant in variants {
+                    match &variant.fields {
+                        Some(EnumFields::Named(fields)) => {
+                            fields.iter().for_each(|f| collect_len_generics(&f.ty, out))
+                        }
+                        Some(EnumFields::Tuple(tys)) => {
+                            tys.iter().for_each(|ty| collect_len_generics(ty, out))
+                        }
+                        None => {}
+                    }
+                }
+            }
+            IdlTypeDefinitionTy::Alias { value } => collect_len_generics(value, out),
+        }
+    }
+
+    fn collect_len_generics(ty: &IdlType, out: &mut Vec<String>) {
+        match ty {
+            IdlType::GenericLenArray(inner, len) => {
+                out.push(len.clone());
+                collect_len_generics(inner, out);
+            }
+            IdlType::Option(inner) | IdlType::Vec(inner) | IdlType::Array(inner, _) => {
+                collect_len_generics(inner, out)
+            }
+            IdlType::DefinedWithTypeArgs { args, .. } => {
+                for arg in args {
+                    if let IdlDefinedTypeArg::Type(ty) = arg {
+                        collect_len_generics(ty, out);
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -914,9 +978,14 @@ mod legacy {
                         .into_iter()
                         .map(|g| match g {
                             t::IdlTypeDefGeneric::Type { name: g_name } => Ok(g_name),
+                            // Legacy IDLs list `usize` const generics (array
+                            // lengths) by name, same as type generics
+                            t::IdlTypeDefGeneric::Const { name: g_name, ty } if ty == "usize" => {
+                                Ok(g_name)
+                            }
                             t::IdlTypeDefGeneric::Const { .. } => Err(anyhow!(
-                                "Type `{name}` uses const generics; the legacy IDL spec only \
-                                 supports type generics"
+                                "Type `{name}` uses non-`usize` const generics; the legacy IDL \
+                                 spec only supports type and `usize` const generics"
                             )),
                         })
                         .collect::<Result<Vec<_>>>()?,

@@ -30,6 +30,7 @@ The minor version will be incremented upon a breaking change and the patch versi
 - ts: Stop the accounts resolver from failing with a max depth error when every account resolves on the last allowed pass ([#5155](https://github.com/otter-sec/anchor/pull/5155)).
 - cli: Fix generated projects with `--anchor-version v2` ([#5187](https://github.com/otter-sec/anchor/pull/5187)).
 - cli: Keep a custom provider `ws` URL when rewriting `Anchor.toml` ([#5193](https://github.com/otter-sec/anchor/issues/5193)).
+- idl: Keep type definition generics when converting legacy IDLs, mapping array-length generics to `usize` const generics.
 
 ### Breaking
 
